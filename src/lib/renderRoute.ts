@@ -1,4 +1,5 @@
-import type { RouteSettings, Waypoint } from '../types'
+import type { Route, RouteSettings, Waypoint } from '../types'
+import { sortedWaypoints } from '../hooks/useRouteEditor'
 
 export const CANVAS_W = 1280
 export const CANVAS_H = 720
@@ -8,22 +9,21 @@ const RED: [string, string] = ['#b32222', '#7c1010']
 const GREEN: [string, string] = ['#3aa757', '#13602b']
 const BG = '#f7f5ef'
 const TITLE_COLOR = '#1d5c2e'
+const ROUTE_LABEL_COLOR = '#8a1515'
 const BAR_RED = '#8a1515'
 const BAR_GOLD = '#d9b389'
 
-// ---- 布局常量 ----
-const MARGIN_X = 90
-const TOP_PHOTO_Y = 82
-const PHOTO_H = 190
-const CHEV_Y = 312
-const CHEV_H = 58
-const BOTTOM_PHOTO_Y = 428
 const BAR_Y = 692
+const LABEL_W = 96
 
 export interface RenderOptions {
-  waypoints: Waypoint[] // 已按编号排序
+  routes: Route[]
   settings: RouteSettings
   images: Map<string, HTMLImageElement>
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v))
 }
 
 function resolveColor(wp: Waypoint, index: number): [string, string] {
@@ -74,13 +74,14 @@ function drawChevronLabel(
   cx: number,
   cy: number,
   maxW: number,
+  baseSize: number,
 ) {
   if (!text.trim()) return
   ctx.fillStyle = '#ffffff'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
-  let size = 22
+  let size = baseSize
   const buildLines = (fs: number): string[] => {
     ctx.font = `bold ${fs}px "Microsoft YaHei", "PingFang SC", sans-serif`
     const raw = text.split('\n')
@@ -101,13 +102,13 @@ function drawChevronLabel(
   }
 
   let lines = buildLines(size)
-  while (lines.length > 2 && size > 13) {
+  while (lines.length > 2 && size > 11) {
     size -= 1
     lines = buildLines(size)
   }
   if (lines.length > 2) lines = [lines[0], lines.slice(1).join('')]
 
-  const lh = size + 6
+  const lh = size + 5
   const startY = cy - ((lines.length - 1) * lh) / 2
   lines.forEach((line, i) => ctx.fillText(line, cx, startY + i * lh))
 }
@@ -120,17 +121,18 @@ function drawPhoto(
   w: number,
   h: number,
 ) {
+  const radius = clamp(h * 0.1, 8, 18)
   ctx.save()
   ctx.shadowColor = 'rgba(0,0,0,0.25)'
   ctx.shadowBlur = 10
   ctx.shadowOffsetY = 4
-  roundRectPath(ctx, x, y, w, h, 18)
+  roundRectPath(ctx, x, y, w, h, radius)
   if (img) {
     ctx.fillStyle = '#ddd'
     ctx.fill()
     ctx.restore()
     ctx.save()
-    roundRectPath(ctx, x, y, w, h, 18)
+    roundRectPath(ctx, x, y, w, h, radius)
     ctx.clip()
     // cover 裁剪
     const ir = img.naturalWidth / img.naturalHeight
@@ -147,14 +149,14 @@ function drawPhoto(
     ctx.fill()
     ctx.restore()
     ctx.save()
-    roundRectPath(ctx, x, y, w, h, 18)
+    roundRectPath(ctx, x, y, w, h, radius)
     ctx.setLineDash([6, 5])
     ctx.strokeStyle = '#b7b2a6'
     ctx.lineWidth = 2
     ctx.stroke()
     ctx.setLineDash([])
     ctx.fillStyle = '#9a9587'
-    ctx.font = '18px "Microsoft YaHei", sans-serif'
+    ctx.font = `${clamp(h * 0.1, 12, 18)}px "Microsoft YaHei", sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText('未上传照片', x + w / 2, y + h / 2)
@@ -162,49 +164,78 @@ function drawPhoto(
   ctx.restore()
 }
 
-export function drawRoute(ctx: CanvasRenderingContext2D, opts: RenderOptions) {
-  const { waypoints, settings, images } = opts
+/** 竖排路线名（如「路线一」），逐字纵向排列 */
+function drawVerticalLabel(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  cx: number,
+  bandMidY: number,
+  bandH: number,
+) {
+  const chars = [...text]
+  if (!chars.length) return
+  const size = clamp(bandH * 0.13, 22, 40)
+  const lh = size * 1.18
+  const total = lh * chars.length
+  const startY = bandMidY - total / 2 + lh / 2
+  ctx.fillStyle = ROUTE_LABEL_COLOR
+  ctx.font = `bold ${size}px KaiTi, "STKaiti", "Microsoft YaHei", serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  chars.forEach((ch, i) => ctx.fillText(ch, cx, startY + i * lh))
+}
 
-  // 背景
-  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
-  ctx.fillStyle = BG
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+function drawBand(
+  ctx: CanvasRenderingContext2D,
+  route: Route,
+  bandTop: number,
+  bandH: number,
+  opts: RenderOptions,
+) {
+  const { settings, images } = opts
+  const bandMid = bandTop + bandH / 2
 
-  // 顶部标题
-  if (settings.title.trim()) {
-    ctx.fillStyle = TITLE_COLOR
-    ctx.font = 'bold 30px "Microsoft YaHei", "PingFang SC", sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(settings.title, CANVAS_W / 2, 34)
+  // 左侧竖排路线名
+  const hasLabel = route.name.trim().length > 0
+  if (hasLabel) {
+    drawVerticalLabel(ctx, route.name.trim(), 30 + LABEL_W / 2, bandMid, bandH)
   }
-  if (settings.subtitle.trim()) {
-    ctx.fillStyle = '#5d7a63'
-    ctx.font = '13px "Times New Roman", serif'
-    ctx.textAlign = 'center'
-    ctx.fillText(settings.subtitle, CANVAS_W / 2, 60)
-  }
+  const x0 = hasLabel ? 30 + LABEL_W + 14 : 50
+  const x1 = CANVAS_W - 50
 
-  const n = waypoints.length
+  const wps = sortedWaypoints(route)
+  const n = wps.length
   if (n === 0) {
-    ctx.fillStyle = '#a39d8d'
-    ctx.font = '24px "Microsoft YaHei", sans-serif'
+    ctx.fillStyle = '#b3ac9c'
+    ctx.font = '17px "Microsoft YaHei", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText('在左侧添加路径点，上传照片后这里会实时生成路线指引图', CANVAS_W / 2, CANVAS_H / 2)
+    ctx.fillText('（该路线还没有路径点）', (x0 + x1) / 2, bandMid)
+    return
   }
 
-  const slotW = (CANVAS_W - MARGIN_X * 2) / Math.max(n, 1)
-  const photoW = Math.min(250, slotW - 16)
-  const photoH = Math.min(PHOTO_H, photoW * 0.76 + 40)
-  const chevW = Math.min(210, slotW - 8)
-  const tip = Math.min(30, chevW * 0.16)
+  // 垂直布局：上排照片 / 中间箭头带 / 下排照片，整体在带内垂直居中
+  const chevH = clamp(bandH * 0.16, 30, 58)
+  const gap = clamp(bandH * 0.045, 8, 16)
+  let photoH = (bandH - chevH - gap * 2 - 16) / 2
+  photoH = clamp(photoH, 56, 200)
+  const stackH = photoH * 2 + chevH + gap * 2
+  const topY = bandTop + (bandH - stackH) / 2
+  const chevY = topY + photoH + gap
+  const botY = chevY + chevH + gap
 
-  waypoints.forEach((wp, i) => {
-    const cx = MARGIN_X + slotW * (i + 0.5)
+  const slotW = (x1 - x0) / n
+  const photoW = Math.min(photoH * 1.35, slotW - 14)
+  const chevW = Math.min(220, slotW - 8)
+  const tip = Math.min(30, chevW * 0.16)
+  const badgeR = clamp(photoH * 0.095, 11, 17)
+  const labelSize = clamp(22 * (chevH / 58), 12, 22)
+
+  wps.forEach((wp, i) => {
+    const cx = x0 + slotW * (i + 0.5)
     const isTop = i % 2 === 0
     const photoX = cx - photoW / 2
-    const photoY = isTop ? TOP_PHOTO_Y : BOTTOM_PHOTO_Y
+    const photoY = isTop ? topY : botY
     const chevX = cx - chevW / 2
     const [c1, c2] = resolveColor(wp, i)
 
@@ -215,9 +246,9 @@ export function drawRoute(ctx: CanvasRenderingContext2D, opts: RenderOptions) {
       ctx.beginPath()
       if (isTop) {
         ctx.moveTo(photoX + photoW * 0.78, photoY + photoH)
-        ctx.lineTo(chevX + chevW * 0.82, CHEV_Y)
+        ctx.lineTo(chevX + chevW * 0.82, chevY)
       } else {
-        ctx.moveTo(chevX + chevW * 0.82, CHEV_Y + CHEV_H)
+        ctx.moveTo(chevX + chevW * 0.82, chevY + chevH)
         ctx.lineTo(photoX + photoW * 0.78, photoY)
       }
       ctx.stroke()
@@ -230,17 +261,17 @@ export function drawRoute(ctx: CanvasRenderingContext2D, opts: RenderOptions) {
     // 编号角标
     if (settings.showNumbers) {
       ctx.beginPath()
-      ctx.arc(photoX + 6, photoY + 6, 17, 0, Math.PI * 2)
+      ctx.arc(photoX + badgeR * 0.4, photoY + badgeR * 0.4, badgeR, 0, Math.PI * 2)
       ctx.fillStyle = '#a51919'
       ctx.fill()
       ctx.lineWidth = 2.5
       ctx.strokeStyle = '#ffffff'
       ctx.stroke()
       ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 19px "Microsoft YaHei", sans-serif'
+      ctx.font = `bold ${clamp(badgeR * 1.1, 12, 19)}px "Microsoft YaHei", sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(String(wp.number), photoX + 6, photoY + 7)
+      ctx.fillText(String(wp.number), photoX + badgeR * 0.4, photoY + badgeR * 0.4 + 1)
     }
 
     // 箭头
@@ -251,17 +282,60 @@ export function drawRoute(ctx: CanvasRenderingContext2D, opts: RenderOptions) {
     const grad = ctx.createLinearGradient(chevX, 0, chevX + chevW, 0)
     grad.addColorStop(0, c1)
     grad.addColorStop(1, c2)
-    chevronPath(ctx, chevX, CHEV_Y, chevW, CHEV_H, tip)
+    chevronPath(ctx, chevX, chevY, chevW, chevH, tip)
     ctx.fillStyle = grad
     ctx.fill()
     ctx.restore()
-    chevronPath(ctx, chevX, CHEV_Y, chevW, CHEV_H, tip)
+    chevronPath(ctx, chevX, chevY, chevW, chevH, tip)
     ctx.lineWidth = 3
     ctx.strokeStyle = '#ffffff'
     ctx.stroke()
 
     // 箭头文字
-    drawChevronLabel(ctx, wp.label, cx + tip / 2, CHEV_Y + CHEV_H / 2, chevW - tip * 2 - 14)
+    drawChevronLabel(ctx, wp.label, cx + tip / 2, chevY + chevH / 2, chevW - tip * 2 - 14, labelSize)
+  })
+}
+
+export function drawRoute(ctx: CanvasRenderingContext2D, opts: RenderOptions) {
+  const { routes, settings } = opts
+
+  // 背景
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
+  ctx.fillStyle = BG
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+
+  // 顶部标题
+  let headerH = 24
+  if (settings.title.trim()) {
+    ctx.fillStyle = TITLE_COLOR
+    ctx.font = 'bold 30px "Microsoft YaHei", "PingFang SC", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(settings.title, CANVAS_W / 2, 34)
+    headerH = 56
+  }
+  if (settings.subtitle.trim()) {
+    ctx.fillStyle = '#5d7a63'
+    ctx.font = '13px "Times New Roman", serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(settings.subtitle, CANVAS_W / 2, settings.title.trim() ? 60 : 34)
+    headerH = Math.max(headerH, settings.title.trim() ? 76 : 52)
+  }
+
+  if (routes.length === 0) {
+    ctx.fillStyle = '#a39d8d'
+    ctx.font = '24px "Microsoft YaHei", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('在左侧添加路线和路径点，上传照片后这里会实时生成指引图', CANVAS_W / 2, CANVAS_H / 2)
+  }
+
+  // 路线分带
+  const areaTop = headerH + 8
+  const areaBottom = BAR_Y - 10
+  const bandH = (areaBottom - areaTop) / Math.max(routes.length, 1)
+  routes.forEach((route, i) => {
+    drawBand(ctx, route, areaTop + i * bandH, bandH, opts)
   })
 
   // 底部装饰条：红色通栏 + 左侧金色斜切块
@@ -288,12 +362,13 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
 
 /** 导出用：先把所有照片加载完，再离屏渲染成 PNG Blob */
 export async function renderToBlob(
-  waypoints: Waypoint[],
+  routes: Route[],
   settings: RouteSettings,
 ): Promise<Blob> {
   const images = new Map<string, HTMLImageElement>()
   await Promise.all(
-    waypoints
+    routes
+      .flatMap((r) => r.waypoints)
       .filter((w) => w.photo)
       .map(async (w) => {
         try {
@@ -308,7 +383,7 @@ export async function renderToBlob(
   canvas.height = CANVAS_H
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('无法创建画布')
-  drawRoute(ctx, { waypoints, settings, images })
+  drawRoute(ctx, { routes, settings, images })
   return new Promise((resolve, reject) => {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('导出失败'))), 'image/png')
   })

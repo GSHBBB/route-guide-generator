@@ -1,26 +1,51 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { RouteSettings, Waypoint } from '../types'
+import { useCallback, useEffect, useState } from 'react'
+import type { Route, RouteSettings, Waypoint } from '../types'
 import { DEFAULT_SETTINGS } from '../types'
 
-const LS_WAYPOINTS = 'route-guide.waypoints.v1'
+const LS_ROUTES = 'route-guide.routes.v2'
+const LS_LEGACY = 'route-guide.waypoints.v1'
 const LS_SETTINGS = 'route-guide.settings.v1'
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 }
 
-function loadWaypoints(): Waypoint[] {
+function makeWaypoint(number: number, label = `路径点 ${number}`): Waypoint {
+  return { id: uid(), number, label, color: 'auto', photo: null }
+}
+
+function defaultRoutes(): Route[] {
+  return [
+    {
+      id: uid(),
+      name: '路线一',
+      waypoints: [
+        { id: uid(), number: 1, label: '熊德龙学生\n活动中心', color: 'auto', photo: null },
+        { id: uid(), number: 2, label: '三楼301', color: 'auto', photo: null },
+      ],
+    },
+    {
+      id: uid(),
+      name: '路线二',
+      waypoints: [makeWaypoint(1), makeWaypoint(2)],
+    },
+  ]
+}
+
+function loadRoutes(): Route[] {
   try {
-    const raw = localStorage.getItem(LS_WAYPOINTS)
-    if (raw) return JSON.parse(raw) as Waypoint[]
+    const raw = localStorage.getItem(LS_ROUTES)
+    if (raw) return JSON.parse(raw) as Route[]
+    // 迁移 v1 单路线数据
+    const legacy = localStorage.getItem(LS_LEGACY)
+    if (legacy) {
+      const wps = JSON.parse(legacy) as Waypoint[]
+      if (wps.length) return [{ id: uid(), name: '路线一', waypoints: wps }]
+    }
   } catch {
     /* ignore */
   }
-  // 默认示例：复现参考图的熊德龙路线
-  return [
-    { id: uid(), number: 1, label: '熊德龙学生\n活动中心', color: 'auto', photo: null },
-    { id: uid(), number: 2, label: '三楼301', color: 'auto', photo: null },
-  ]
+  return defaultRoutes()
 }
 
 function loadSettings(): RouteSettings {
@@ -33,17 +58,24 @@ function loadSettings(): RouteSettings {
   return DEFAULT_SETTINGS
 }
 
+/** 路线内路径点按编号升序 */
+export function sortedWaypoints(route: Route): Waypoint[] {
+  return [...route.waypoints].sort((a, b) => a.number - b.number)
+}
+
+const CN_NUM = ['一', '二', '三', '四', '五', '六']
+
 export function useRouteEditor() {
-  const [waypoints, setWaypoints] = useState<Waypoint[]>(loadWaypoints)
+  const [routes, setRoutes] = useState<Route[]>(loadRoutes)
   const [settings, setSettings] = useState<RouteSettings>(loadSettings)
 
   useEffect(() => {
     try {
-      localStorage.setItem(LS_WAYPOINTS, JSON.stringify(waypoints))
+      localStorage.setItem(LS_ROUTES, JSON.stringify(routes))
     } catch {
       /* 照片过大导致超限时静默忽略 */
     }
-  }, [waypoints])
+  }, [routes])
 
   useEffect(() => {
     try {
@@ -53,57 +85,98 @@ export function useRouteEditor() {
     }
   }, [settings])
 
-  /** 渲染/导出始终使用按编号升序的列表 */
-  const sorted = useMemo(
-    () => [...waypoints].sort((a, b) => a.number - b.number),
-    [waypoints],
-  )
-
-  const addWaypoint = useCallback(() => {
-    setWaypoints((list) => {
-      const nextNo = list.length ? Math.max(...list.map((w) => w.number)) + 1 : 1
-      return [
-        ...list,
-        { id: uid(), number: nextNo, label: `路径点 ${nextNo}`, color: 'auto' as const, photo: null },
-      ]
-    })
+  // ---- 路线操作 ----
+  const addRoute = useCallback(() => {
+    setRoutes((list) => [
+      ...list,
+      { id: uid(), name: `路线${CN_NUM[list.length] ?? list.length + 1}`, waypoints: [] },
+    ])
   }, [])
 
-  const removeWaypoint = useCallback((id: string) => {
-    setWaypoints((list) => list.filter((w) => w.id !== id))
+  const removeRoute = useCallback((routeId: string) => {
+    setRoutes((list) => list.filter((r) => r.id !== routeId))
   }, [])
 
-  const updateWaypoint = useCallback((id: string, patch: Partial<Waypoint>) => {
-    setWaypoints((list) => list.map((w) => (w.id === id ? { ...w, ...patch } : w)))
+  const updateRoute = useCallback((routeId: string, patch: Partial<Omit<Route, 'id' | 'waypoints'>>) => {
+    setRoutes((list) => list.map((r) => (r.id === routeId ? { ...r, ...patch } : r)))
   }, [])
 
-  /** 上移/下移：与相邻（按编号排序后）项交换编号 */
-  const moveWaypoint = useCallback((id: string, dir: -1 | 1) => {
-    setWaypoints((list) => {
-      const s = [...list].sort((a, b) => a.number - b.number)
-      const idx = s.findIndex((w) => w.id === id)
+  const moveRoute = useCallback((routeId: string, dir: -1 | 1) => {
+    setRoutes((list) => {
+      const idx = list.findIndex((r) => r.id === routeId)
       const target = idx + dir
-      if (idx < 0 || target < 0 || target >= s.length) return list
-      const a = s[idx]
-      const b = s[target]
-      return list.map((w) => {
-        if (w.id === a.id) return { ...w, number: b.number }
-        if (w.id === b.id) return { ...w, number: a.number }
-        return w
-      })
+      if (idx < 0 || target < 0 || target >= list.length) return list
+      const next = [...list]
+      ;[next[idx], next[target]] = [next[target], next[idx]]
+      return next
     })
+  }, [])
+
+  // ---- 路径点操作 ----
+  const addWaypoint = useCallback((routeId: string) => {
+    setRoutes((list) =>
+      list.map((r) => {
+        if (r.id !== routeId) return r
+        const nextNo = r.waypoints.length ? Math.max(...r.waypoints.map((w) => w.number)) + 1 : 1
+        return { ...r, waypoints: [...r.waypoints, makeWaypoint(nextNo)] }
+      }),
+    )
+  }, [])
+
+  const removeWaypoint = useCallback((routeId: string, wpId: string) => {
+    setRoutes((list) =>
+      list.map((r) =>
+        r.id === routeId ? { ...r, waypoints: r.waypoints.filter((w) => w.id !== wpId) } : r,
+      ),
+    )
+  }, [])
+
+  const updateWaypoint = useCallback((routeId: string, wpId: string, patch: Partial<Waypoint>) => {
+    setRoutes((list) =>
+      list.map((r) =>
+        r.id === routeId
+          ? { ...r, waypoints: r.waypoints.map((w) => (w.id === wpId ? { ...w, ...patch } : w)) }
+          : r,
+      ),
+    )
+  }, [])
+
+  /** 与相邻（按编号排序后）项交换编号 */
+  const moveWaypoint = useCallback((routeId: string, wpId: string, dir: -1 | 1) => {
+    setRoutes((list) =>
+      list.map((r) => {
+        if (r.id !== routeId) return r
+        const s = [...r.waypoints].sort((a, b) => a.number - b.number)
+        const idx = s.findIndex((w) => w.id === wpId)
+        const target = idx + dir
+        if (idx < 0 || target < 0 || target >= s.length) return r
+        const a = s[idx]
+        const b = s[target]
+        return {
+          ...r,
+          waypoints: r.waypoints.map((w) => {
+            if (w.id === a.id) return { ...w, number: b.number }
+            if (w.id === b.id) return { ...w, number: a.number }
+            return w
+          }),
+        }
+      }),
+    )
   }, [])
 
   const resetAll = useCallback(() => {
-    setWaypoints([])
+    setRoutes(defaultRoutes())
     setSettings(DEFAULT_SETTINGS)
   }, [])
 
   return {
-    waypoints,
-    sorted,
+    routes,
     settings,
     setSettings,
+    addRoute,
+    removeRoute,
+    updateRoute,
+    moveRoute,
     addWaypoint,
     removeWaypoint,
     updateWaypoint,

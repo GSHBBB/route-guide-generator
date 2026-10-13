@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RouteSettings, Waypoint } from '../types'
+import type { Route, RouteSettings } from '../types'
 import { CANVAS_H, CANVAS_W, drawRoute } from '../lib/renderRoute'
 
 interface Props {
-  waypoints: Waypoint[]
+  routes: Route[]
   settings: RouteSettings
 }
 
 /** 实时预览：内部固定 1280x720 画布，CSS 自适应缩放 */
-export default function RouteCanvas({ waypoints, settings }: Props) {
+export default function RouteCanvas({ routes, settings }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imagesRef = useRef(new Map<string, HTMLImageElement>())
   const [tick, setTick] = useState(0)
@@ -17,21 +17,21 @@ export default function RouteCanvas({ waypoints, settings }: Props) {
   useEffect(() => {
     const cache = imagesRef.current
     if (cache.size > 80) cache.clear()
-    for (const wp of waypoints) {
+    for (const wp of routes.flatMap((r) => r.waypoints)) {
       if (!wp.photo || cache.has(wp.photo)) continue
       const img = new Image()
       img.onload = () => setTick((t) => t + 1)
       img.src = wp.photo
       cache.set(wp.photo, img)
     }
-  }, [waypoints])
+  }, [routes])
 
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
     if (!ctx) return
-    drawRoute(ctx, { waypoints, settings, images: imagesRef.current })
-  }, [waypoints, settings, tick])
+    drawRoute(ctx, { routes, settings, images: imagesRef.current })
+  }, [routes, settings, tick])
 
   return (
     <canvas
