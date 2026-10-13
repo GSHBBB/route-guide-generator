@@ -27,8 +27,8 @@ export interface RouteSettings {
 }
 
 export const DEFAULT_SETTINGS: RouteSettings = {
-  title: '中山大学学生会 · 中山大学研究生会',
-  subtitle: 'Student Union of Yat-sen University',
+  title: '',
+  subtitle: '',
   showNumbers: true,
   showConnectors: true,
 }

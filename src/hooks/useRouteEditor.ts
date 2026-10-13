@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS } from '../types'
 
 const LS_ROUTES = 'route-guide.routes.v2'
 const LS_LEGACY = 'route-guide.waypoints.v1'
-const LS_SETTINGS = 'route-guide.settings.v1'
+const LS_SETTINGS = 'route-guide.settings.v2'
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
@@ -112,6 +112,20 @@ export function useRouteEditor() {
     })
   }, [])
 
+  /** 拖动排序：把某条路线插入到新位置 */
+  const reorderRoute = useCallback((routeId: string, toIndex: number) => {
+    setRoutes((list) => {
+      const from = list.findIndex((r) => r.id === routeId)
+      if (from < 0) return list
+      const clamped = Math.max(0, Math.min(list.length - 1, toIndex))
+      if (clamped === from) return list
+      const next = [...list]
+      const [moved] = next.splice(from, 1)
+      next.splice(clamped, 0, moved)
+      return next
+    })
+  }, [])
+
   // ---- 路径点操作 ----
   const addWaypoint = useCallback((routeId: string) => {
     setRoutes((list) =>
@@ -194,6 +208,7 @@ export function useRouteEditor() {
     removeRoute,
     updateRoute,
     moveRoute,
+    reorderRoute,
     addWaypoint,
     removeWaypoint,
     updateWaypoint,

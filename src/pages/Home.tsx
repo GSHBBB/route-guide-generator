@@ -15,6 +15,7 @@ export default function Home() {
     removeRoute,
     updateRoute,
     moveRoute,
+    reorderRoute,
     addWaypoint,
     removeWaypoint,
     updateWaypoint,
@@ -77,6 +78,7 @@ export default function Home() {
             onRemoveRoute={removeRoute}
             onUpdateRoute={updateRoute}
             onMoveRoute={moveRoute}
+            onReorderRoute={reorderRoute}
             onAddWaypoint={addWaypoint}
             onRemoveWaypoint={removeWaypoint}
             onUpdateWaypoint={updateWaypoint}

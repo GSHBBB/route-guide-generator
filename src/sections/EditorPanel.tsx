@@ -24,6 +24,7 @@ interface Props {
   onRemoveRoute: (routeId: string) => void
   onUpdateRoute: (routeId: string, patch: Partial<Omit<Route, 'id' | 'waypoints'>>) => void
   onMoveRoute: (routeId: string, dir: -1 | 1) => void
+  onReorderRoute: (routeId: string, toIndex: number) => void
   onAddWaypoint: (routeId: string) => void
   onRemoveWaypoint: (routeId: string, wpId: string) => void
   onUpdateWaypoint: (routeId: string, wpId: string, patch: Partial<Waypoint>) => void
@@ -217,6 +218,10 @@ function RouteSection({
   route,
   ri,
   totalRoutes,
+  routeDragging,
+  routeDragOver,
+  onRouteDragStart,
+  onRouteDragEnd,
   onRemoveRoute,
   onUpdateRoute,
   onMoveRoute,
@@ -229,6 +234,10 @@ function RouteSection({
   route: Route
   ri: number
   totalRoutes: number
+  routeDragging: boolean
+  routeDragOver: boolean
+  onRouteDragStart: () => void
+  onRouteDragEnd: () => void
   onRemoveRoute: (routeId: string) => void
   onUpdateRoute: (routeId: string, patch: Partial<Omit<Route, 'id' | 'waypoints'>>) => void
   onMoveRoute: (routeId: string, dir: -1 | 1) => void
@@ -252,8 +261,28 @@ function RouteSection({
   }
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-red-900/15 bg-red-50/40 p-3">
+    <div
+      className={`space-y-2.5 rounded-xl border bg-red-50/40 p-3 transition-shadow ${
+        routeDragging
+          ? 'opacity-40 border-dashed border-neutral-300'
+          : routeDragOver
+            ? 'border-red-500 ring-2 ring-red-200'
+            : 'border-red-900/15'
+      }`}
+    >
       <div className="flex items-center gap-2">
+        <span
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'move'
+            onRouteDragStart()
+          }}
+          onDragEnd={onRouteDragEnd}
+          className="cursor-grab active:cursor-grabbing text-neutral-300 hover:text-neutral-500"
+          title="拖动调整路线顺序"
+        >
+          <GripVertical size={15} />
+        </span>
         <Input
           value={route.name}
           onChange={(e) => onUpdateRoute(route.id, { name: e.target.value })}
@@ -333,12 +362,16 @@ export default function EditorPanel({
   onRemoveRoute,
   onUpdateRoute,
   onMoveRoute,
+  onReorderRoute,
   onAddWaypoint,
   onRemoveWaypoint,
   onUpdateWaypoint,
   onMoveWaypoint,
   onReorderWaypoint,
 }: Props) {
+  const [routeDragId, setRouteDragId] = useState<string | null>(null)
+  const [routeOverId, setRouteOverId] = useState<string | null>(null)
+
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
       <div className="space-y-2 rounded-xl bg-neutral-50 p-3 border border-neutral-200">
@@ -348,6 +381,7 @@ export default function EditorPanel({
             value={settings.title}
             onChange={(e) => onSettings({ ...settings, title: e.target.value })}
             className="h-8"
+            placeholder="留空则不显示标题"
           />
         </div>
         <div>
@@ -356,6 +390,7 @@ export default function EditorPanel({
             value={settings.subtitle}
             onChange={(e) => onSettings({ ...settings, subtitle: e.target.value })}
             className="h-8"
+            placeholder="留空则不显示副标题"
           />
         </div>
         <div className="flex items-center justify-between pt-1">
@@ -375,20 +410,43 @@ export default function EditorPanel({
       </div>
 
       {routes.map((route, ri) => (
-        <RouteSection
+        <div
           key={route.id}
-          route={route}
-          ri={ri}
-          totalRoutes={routes.length}
-          onRemoveRoute={onRemoveRoute}
-          onUpdateRoute={onUpdateRoute}
-          onMoveRoute={onMoveRoute}
-          onAddWaypoint={onAddWaypoint}
-          onRemoveWaypoint={onRemoveWaypoint}
-          onUpdateWaypoint={onUpdateWaypoint}
-          onMoveWaypoint={onMoveWaypoint}
-          onReorderWaypoint={onReorderWaypoint}
-        />
+          onDragOver={(e) => {
+            if (!routeDragId || routeDragId === route.id) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            setRouteOverId(route.id)
+          }}
+          onDrop={(e) => {
+            if (!routeDragId || routeDragId === route.id) return
+            e.preventDefault()
+            onReorderRoute(routeDragId, ri)
+            setRouteDragId(null)
+            setRouteOverId(null)
+          }}
+        >
+          <RouteSection
+            route={route}
+            ri={ri}
+            totalRoutes={routes.length}
+            routeDragging={routeDragId === route.id}
+            routeDragOver={routeOverId === route.id && routeDragId !== route.id}
+            onRouteDragStart={() => setRouteDragId(route.id)}
+            onRouteDragEnd={() => {
+              setRouteDragId(null)
+              setRouteOverId(null)
+            }}
+            onRemoveRoute={onRemoveRoute}
+            onUpdateRoute={onUpdateRoute}
+            onMoveRoute={onMoveRoute}
+            onAddWaypoint={onAddWaypoint}
+            onRemoveWaypoint={onRemoveWaypoint}
+            onUpdateWaypoint={onUpdateWaypoint}
+            onMoveWaypoint={onMoveWaypoint}
+            onReorderWaypoint={onReorderWaypoint}
+          />
+        </div>
       ))}
 
       <Button onClick={onAddRoute} variant="outline" className="w-full border-dashed">
