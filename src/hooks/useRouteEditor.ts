@@ -164,6 +164,23 @@ export function useRouteEditor() {
     )
   }, [])
 
+  /** 拖动排序：把某路径点插入到新位置，并按新顺序重排编号为 1..n */
+  const reorderWaypoint = useCallback((routeId: string, wpId: string, toIndex: number) => {
+    setRoutes((list) =>
+      list.map((r) => {
+        if (r.id !== routeId) return r
+        const s = [...r.waypoints].sort((a, b) => a.number - b.number)
+        const from = s.findIndex((w) => w.id === wpId)
+        if (from < 0) return r
+        const clamped = Math.max(0, Math.min(s.length - 1, toIndex))
+        if (clamped === from) return r
+        const [moved] = s.splice(from, 1)
+        s.splice(clamped, 0, moved)
+        return { ...r, waypoints: s.map((w, i) => ({ ...w, number: i + 1 })) }
+      }),
+    )
+  }, [])
+
   const resetAll = useCallback(() => {
     setRoutes(defaultRoutes())
     setSettings(DEFAULT_SETTINGS)
@@ -181,6 +198,7 @@ export function useRouteEditor() {
     removeWaypoint,
     updateWaypoint,
     moveWaypoint,
+    reorderWaypoint,
     resetAll,
   }
 }

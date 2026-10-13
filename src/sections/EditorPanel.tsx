@@ -1,4 +1,5 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
+import type { DragEvent } from 'react'
 import type { Route, RouteSettings, Waypoint } from '../types'
 import { fileToDataURL, sortedWaypoints } from '../hooks/useRouteEditor'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { ArrowDown, ArrowUp, ImagePlus, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, GripVertical, ImagePlus, Plus, Trash2 } from 'lucide-react'
 
 interface Props {
   routes: Route[]
@@ -27,12 +28,19 @@ interface Props {
   onRemoveWaypoint: (routeId: string, wpId: string) => void
   onUpdateWaypoint: (routeId: string, wpId: string, patch: Partial<Waypoint>) => void
   onMoveWaypoint: (routeId: string, wpId: string, dir: -1 | 1) => void
+  onReorderWaypoint: (routeId: string, wpId: string, toIndex: number) => void
 }
 
 function WaypointCard({
   wp,
   index,
   total,
+  dragging,
+  dragOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onRemove,
   onUpdate,
   onMove,
@@ -40,6 +48,12 @@ function WaypointCard({
   wp: Waypoint
   index: number
   total: number
+  dragging: boolean
+  dragOver: boolean
+  onDragStart: () => void
+  onDragOver: (e: DragEvent) => void
+  onDrop: () => void
+  onDragEnd: () => void
   onRemove: () => void
   onUpdate: (patch: Partial<Waypoint>) => void
   onMove: (dir: -1 | 1) => void
@@ -59,8 +73,37 @@ function WaypointCard({
   const autoColor = index % 2 === 0 ? '红' : '绿'
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-2.5 space-y-2">
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart()
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        onDragOver(e)
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        onDrop()
+      }}
+      onDragEnd={onDragEnd}
+      className={`rounded-lg border bg-white p-2.5 space-y-2 transition-shadow ${
+        dragging
+          ? 'opacity-40 border-dashed border-neutral-300'
+          : dragOver
+            ? 'border-red-500 ring-2 ring-red-200'
+            : 'border-neutral-200'
+      }`}
+    >
       <div className="flex items-center gap-2">
+        <span
+          className="cursor-grab active:cursor-grabbing text-neutral-300 hover:text-neutral-500"
+          title="拖动排序"
+        >
+          <GripVertical size={15} />
+        </span>
         <span
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${
             index % 2 === 0 ? 'bg-red-700' : 'bg-green-700'
@@ -170,6 +213,118 @@ function WaypointCard({
   )
 }
 
+function RouteSection({
+  route,
+  ri,
+  totalRoutes,
+  onRemoveRoute,
+  onUpdateRoute,
+  onMoveRoute,
+  onAddWaypoint,
+  onRemoveWaypoint,
+  onUpdateWaypoint,
+  onMoveWaypoint,
+  onReorderWaypoint,
+}: {
+  route: Route
+  ri: number
+  totalRoutes: number
+  onRemoveRoute: (routeId: string) => void
+  onUpdateRoute: (routeId: string, patch: Partial<Omit<Route, 'id' | 'waypoints'>>) => void
+  onMoveRoute: (routeId: string, dir: -1 | 1) => void
+  onAddWaypoint: (routeId: string) => void
+  onRemoveWaypoint: (routeId: string, wpId: string) => void
+  onUpdateWaypoint: (routeId: string, wpId: string, patch: Partial<Waypoint>) => void
+  onMoveWaypoint: (routeId: string, wpId: string, dir: -1 | 1) => void
+  onReorderWaypoint: (routeId: string, wpId: string, toIndex: number) => void
+}) {
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const wps = sortedWaypoints(route)
+
+  const handleDrop = (targetId: string) => {
+    if (dragId && dragId !== targetId) {
+      const toIndex = wps.findIndex((w) => w.id === targetId)
+      if (toIndex >= 0) onReorderWaypoint(route.id, dragId, toIndex)
+    }
+    setDragId(null)
+    setOverId(null)
+  }
+
+  return (
+    <div className="space-y-2.5 rounded-xl border border-red-900/15 bg-red-50/40 p-3">
+      <div className="flex items-center gap-2">
+        <Input
+          value={route.name}
+          onChange={(e) => onUpdateRoute(route.id, { name: e.target.value })}
+          className="h-8 w-28 font-bold text-red-900"
+          title="路线名（画布左侧竖排显示）"
+        />
+        <span className="text-xs text-neutral-400 flex-1">
+          {wps.length} 个路径点，可拖动排序
+        </span>
+        <button
+          className="p-1 text-neutral-400 hover:text-neutral-700 disabled:opacity-30"
+          disabled={ri === 0}
+          onClick={() => onMoveRoute(route.id, -1)}
+          title="路线上移"
+        >
+          <ArrowUp size={15} />
+        </button>
+        <button
+          className="p-1 text-neutral-400 hover:text-neutral-700 disabled:opacity-30"
+          disabled={ri === totalRoutes - 1}
+          onClick={() => onMoveRoute(route.id, 1)}
+          title="路线下移"
+        >
+          <ArrowDown size={15} />
+        </button>
+        <button
+          className="p-1 text-neutral-400 hover:text-red-600"
+          onClick={() => onRemoveRoute(route.id)}
+          title="删除路线"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {wps.map((wp, i) => (
+          <WaypointCard
+            key={wp.id}
+            wp={wp}
+            index={i}
+            total={wps.length}
+            dragging={dragId === wp.id}
+            dragOver={overId === wp.id && dragId !== wp.id}
+            onDragStart={() => setDragId(wp.id)}
+            onDragOver={() => {
+              if (dragId && dragId !== wp.id) setOverId(wp.id)
+            }}
+            onDrop={() => handleDrop(wp.id)}
+            onDragEnd={() => {
+              setDragId(null)
+              setOverId(null)
+            }}
+            onRemove={() => onRemoveWaypoint(route.id, wp.id)}
+            onUpdate={(patch) => onUpdateWaypoint(route.id, wp.id, patch)}
+            onMove={(dir) => onMoveWaypoint(route.id, wp.id, dir)}
+          />
+        ))}
+      </div>
+
+      <Button
+        onClick={() => onAddWaypoint(route.id)}
+        variant="outline"
+        size="sm"
+        className="w-full border-dashed"
+      >
+        <Plus size={14} className="mr-1" /> 添加路径点
+      </Button>
+    </div>
+  )
+}
+
 export default function EditorPanel({
   routes,
   settings,
@@ -182,6 +337,7 @@ export default function EditorPanel({
   onRemoveWaypoint,
   onUpdateWaypoint,
   onMoveWaypoint,
+  onReorderWaypoint,
 }: Props) {
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
@@ -218,73 +374,22 @@ export default function EditorPanel({
         </div>
       </div>
 
-      {routes.map((route, ri) => {
-        const wps = sortedWaypoints(route)
-        return (
-          <div
-            key={route.id}
-            className="space-y-2.5 rounded-xl border border-red-900/15 bg-red-50/40 p-3"
-          >
-            <div className="flex items-center gap-2">
-              <Input
-                value={route.name}
-                onChange={(e) => onUpdateRoute(route.id, { name: e.target.value })}
-                className="h-8 w-28 font-bold text-red-900"
-                title="路线名（画布左侧竖排显示）"
-              />
-              <span className="text-xs text-neutral-400 flex-1">
-                {wps.length} 个路径点，按编号排序
-              </span>
-              <button
-                className="p-1 text-neutral-400 hover:text-neutral-700 disabled:opacity-30"
-                disabled={ri === 0}
-                onClick={() => onMoveRoute(route.id, -1)}
-                title="路线上移"
-              >
-                <ArrowUp size={15} />
-              </button>
-              <button
-                className="p-1 text-neutral-400 hover:text-neutral-700 disabled:opacity-30"
-                disabled={ri === routes.length - 1}
-                onClick={() => onMoveRoute(route.id, 1)}
-                title="路线下移"
-              >
-                <ArrowDown size={15} />
-              </button>
-              <button
-                className="p-1 text-neutral-400 hover:text-red-600"
-                onClick={() => onRemoveRoute(route.id)}
-                title="删除路线"
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {wps.map((wp, i) => (
-                <WaypointCard
-                  key={wp.id}
-                  wp={wp}
-                  index={i}
-                  total={wps.length}
-                  onRemove={() => onRemoveWaypoint(route.id, wp.id)}
-                  onUpdate={(patch) => onUpdateWaypoint(route.id, wp.id, patch)}
-                  onMove={(dir) => onMoveWaypoint(route.id, wp.id, dir)}
-                />
-              ))}
-            </div>
-
-            <Button
-              onClick={() => onAddWaypoint(route.id)}
-              variant="outline"
-              size="sm"
-              className="w-full border-dashed"
-            >
-              <Plus size={14} className="mr-1" /> 添加路径点
-            </Button>
-          </div>
-        )
-      })}
+      {routes.map((route, ri) => (
+        <RouteSection
+          key={route.id}
+          route={route}
+          ri={ri}
+          totalRoutes={routes.length}
+          onRemoveRoute={onRemoveRoute}
+          onUpdateRoute={onUpdateRoute}
+          onMoveRoute={onMoveRoute}
+          onAddWaypoint={onAddWaypoint}
+          onRemoveWaypoint={onRemoveWaypoint}
+          onUpdateWaypoint={onUpdateWaypoint}
+          onMoveWaypoint={onMoveWaypoint}
+          onReorderWaypoint={onReorderWaypoint}
+        />
+      ))}
 
       <Button onClick={onAddRoute} variant="outline" className="w-full border-dashed">
         <Plus size={16} className="mr-1" /> 添加路线

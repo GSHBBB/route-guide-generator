@@ -19,6 +19,7 @@ export default function Home() {
     removeWaypoint,
     updateWaypoint,
     moveWaypoint,
+    reorderWaypoint,
     resetAll,
   } = useRouteEditor()
   const [exporting, setExporting] = useState(false)
@@ -80,6 +81,7 @@ export default function Home() {
             onRemoveWaypoint={removeWaypoint}
             onUpdateWaypoint={updateWaypoint}
             onMoveWaypoint={moveWaypoint}
+            onReorderWaypoint={reorderWaypoint}
           />
         </aside>
 
