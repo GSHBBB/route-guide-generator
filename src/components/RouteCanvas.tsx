@@ -1,0 +1,44 @@
+import { useEffect, useRef, useState } from 'react'
+import type { RouteSettings, Waypoint } from '../types'
+import { CANVAS_H, CANVAS_W, drawRoute } from '../lib/renderRoute'
+
+interface Props {
+  waypoints: Waypoint[]
+  settings: RouteSettings
+}
+
+/** 实时预览：内部固定 1280x720 画布，CSS 自适应缩放 */
+export default function RouteCanvas({ waypoints, settings }: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const imagesRef = useRef(new Map<string, HTMLImageElement>())
+  const [tick, setTick] = useState(0)
+
+  // 预加载照片，加载完成后触发重绘
+  useEffect(() => {
+    const cache = imagesRef.current
+    if (cache.size > 80) cache.clear()
+    for (const wp of waypoints) {
+      if (!wp.photo || cache.has(wp.photo)) continue
+      const img = new Image()
+      img.onload = () => setTick((t) => t + 1)
+      img.src = wp.photo
+      cache.set(wp.photo, img)
+    }
+  }, [waypoints])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!ctx) return
+    drawRoute(ctx, { waypoints, settings, images: imagesRef.current })
+  }, [waypoints, settings, tick])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={CANVAS_W}
+      height={CANVAS_H}
+      className="w-full h-auto rounded-lg shadow-xl border border-neutral-200 bg-white"
+    />
+  )
+}
